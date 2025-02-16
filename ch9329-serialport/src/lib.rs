@@ -39,7 +39,7 @@ where
     }
 
     #[tracing::instrument(err, ret, skip(self))]
-    pub fn send(&mut self, command: ch9329::Command) -> Result<(), Error> {
+    pub fn send(&mut self, command: ch9329::Command<'_>) -> Result<(), Error> {
         let packet = ch9329::encode(&mut self.buf, self.addr, command.cmd(), |buf| {
             command.data(buf)
         });

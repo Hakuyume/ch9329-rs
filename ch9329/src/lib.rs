@@ -62,8 +62,10 @@ fn sum(buf: &[u8]) -> u8 {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Command {
+pub enum Command<'a> {
     GetInfo,
+    SendMyHidData { data: &'a [u8] },
+    GetParaCfg,
     GetUsbString { type_: UsbStringType },
 }
 
@@ -72,10 +74,23 @@ pub enum Response<'a> {
     GetInfo {
         version: char,
     },
+    GetParaCfg(ParaCfg),
     GetUsbString {
         type_: UsbStringType,
         descriptor: &'a str,
     },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ParaCfg {
+    pub operation_mode: u8,
+    pub serial_communication_mode: u8,
+    pub addr: u8,
+    pub baud_rate: u32,
+    todo_0: [u8; 2 + 2],
+    pub vid: u16,
+    pub pid: u16,
+    todo_1: [u8; 2 + 2 + 1 + 8 + 8 + 1 + 1 + 12],
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -85,17 +100,23 @@ pub enum UsbStringType {
     Serial,
 }
 
-impl Command {
+impl Command<'_> {
     pub fn cmd(self) -> u8 {
         match self {
             Self::GetInfo => 0x01,
+            Self::SendMyHidData { .. } => 0x06,
+            Self::GetParaCfg => 0x08,
             Self::GetUsbString { .. } => 0x0A,
         }
     }
 
     pub fn data(self, buf: &mut [u8]) -> usize {
         match self {
-            Self::GetInfo => 0,
+            Self::GetInfo | Self::GetParaCfg => 0,
+            Self::SendMyHidData { data } => {
+                buf[..data.len()].copy_from_slice(data);
+                data.len()
+            }
             Self::GetUsbString { type_ } => {
                 buf[0] = match type_ {
                     UsbStringType::Vendor => 0x00,
@@ -115,6 +136,30 @@ impl<'a> Response<'a> {
                 if data.len() == 8 {
                     let version = data[0].into();
                     Ok(Self::GetInfo { version })
+                } else {
+                    Err(Error::InvalidData)
+                }
+            }
+            0x88 => {
+                if data.len() == 50 {
+                    let operation_mode = data[0];
+                    let serial_communication_mode = data[1];
+                    let addr = data[2];
+                    let baud_rate = u32::from_be_bytes(data[3..7].try_into().unwrap());
+                    let todo_0 = data[7..11].try_into().unwrap();
+                    let vid = u16::from_be_bytes(data[11..13].try_into().unwrap());
+                    let pid = u16::from_be_bytes(data[13..15].try_into().unwrap());
+                    let todo_1 = data[15..50].try_into().unwrap();
+                    Ok(Self::GetParaCfg(ParaCfg {
+                        operation_mode,
+                        serial_communication_mode,
+                        addr,
+                        baud_rate,
+                        todo_0,
+                        vid,
+                        pid,
+                        todo_1,
+                    }))
                 } else {
                     Err(Error::InvalidData)
                 }
