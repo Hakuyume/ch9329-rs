@@ -1,13 +1,22 @@
 #![no_std]
 
+use core::str::Utf8Error;
+
 pub const MAX_PACKET_SIZE: usize = 5 + 64 + 1;
 
 #[derive(Clone, Copy, Debug, PartialEq, thiserror::Error)]
 pub enum Error {
+    #[error(transparent)]
+    Utf8(#[from] Utf8Error),
+
     #[error("incomplete (expect {0} bytes)")]
     Incomplete(usize),
     #[error("invalid HEAD")]
     InvalidHead,
+    #[error("invalid CMD")]
+    InvalidCmd,
+    #[error("invalid DATA")]
+    InvalidData,
     #[error("invalid SUM")]
     InvalidSum,
 }
@@ -50,6 +59,88 @@ const HEAD: [u8; 2] = [0x57, 0xAB];
 
 fn sum(buf: &[u8]) -> u8 {
     buf.iter().fold(0, |a, b| a.overflowing_add(*b).0)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Command {
+    GetInfo,
+    GetUsbString { type_: UsbStringType },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Response<'a> {
+    GetInfo {
+        version: char,
+    },
+    GetUsbString {
+        type_: UsbStringType,
+        descriptor: &'a str,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum UsbStringType {
+    Vendor,
+    Product,
+    Serial,
+}
+
+impl Command {
+    pub fn cmd(self) -> u8 {
+        match self {
+            Self::GetInfo => 0x01,
+            Self::GetUsbString { .. } => 0x0A,
+        }
+    }
+
+    pub fn data(self, buf: &mut [u8]) -> usize {
+        match self {
+            Self::GetInfo => 0,
+            Self::GetUsbString { type_ } => {
+                buf[0] = match type_ {
+                    UsbStringType::Vendor => 0x00,
+                    UsbStringType::Product => 0x01,
+                    UsbStringType::Serial => 0x02,
+                };
+                1
+            }
+        }
+    }
+}
+
+impl<'a> Response<'a> {
+    pub fn decode(cmd: u8, data: &'a [u8]) -> Result<Self, Error> {
+        match cmd {
+            0x81 => {
+                if data.len() == 8 {
+                    let version = data[0].into();
+                    Ok(Self::GetInfo { version })
+                } else {
+                    Err(Error::InvalidData)
+                }
+            }
+            0x8A => {
+                if data.len() >= 2 {
+                    let type_ = match data[0] {
+                        0x00 => Ok(UsbStringType::Vendor),
+                        0x01 => Ok(UsbStringType::Product),
+                        0x02 => Ok(UsbStringType::Serial),
+                        _ => Err(Error::InvalidData),
+                    }?;
+                    let len = usize::from(data[1]);
+                    if data.len() == 2 + len {
+                        let descriptor = core::str::from_utf8(&data[2..2 + len])?;
+                        Ok(Self::GetUsbString { type_, descriptor })
+                    } else {
+                        Err(Error::InvalidData)
+                    }
+                } else {
+                    Err(Error::InvalidData)
+                }
+            }
+            _ => Err(Error::InvalidCmd),
+        }
+    }
 }
 
 #[cfg(test)]
