@@ -8,7 +8,3 @@ ch9329.path = "../ch9329"
 serialport.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
-
-[dev-dependencies]
-anyhow.workspace = true
-tracing-subscriber.workspace = true

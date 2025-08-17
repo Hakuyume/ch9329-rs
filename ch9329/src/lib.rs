@@ -2,9 +2,14 @@
 
 #![no_std]
 
+mod key_code;
+
+use core::iter;
 use core::str::Utf8Error;
+pub use key_code::KeyCode;
 
 pub const MAX_PACKET_SIZE: usize = 5 + 64 + 1;
+const HEAD: [u8; 2] = [0x57, 0xAB];
 
 #[derive(Clone, Copy, Debug, PartialEq, thiserror::Error)]
 pub enum Error {
@@ -57,8 +62,6 @@ pub fn decode(buf: &[u8]) -> Result<(u8, u8, &[u8]), Error> {
     Ok((addr, cmd, data))
 }
 
-const HEAD: [u8; 2] = [0x57, 0xAB];
-
 fn sum(buf: &[u8]) -> u8 {
     buf.iter().fold(0, |a, b| a.overflowing_add(*b).0)
 }
@@ -66,9 +69,17 @@ fn sum(buf: &[u8]) -> u8 {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Command<'a> {
     GetInfo,
-    SendMyHidData { data: &'a [u8] },
+    SendKbGeneralData {
+        modifiers: KeyModifiers,
+        codes: &'a [KeyCode],
+    },
+    SendMyHidData {
+        data: &'a [u8],
+    },
     GetParaCfg,
-    GetUsbString { type_: UsbStringType },
+    GetUsbString {
+        type_: UsbStringType,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -76,11 +87,52 @@ pub enum Response<'a> {
     GetInfo {
         version: char,
     },
+    SendKbGeneralData(CommandExecutionStatus),
     GetParaCfg(ParaCfg),
     GetUsbString {
         type_: UsbStringType,
         descriptor: &'a str,
     },
+}
+
+bitflags::bitflags! {
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    pub struct KeyModifiers: u8 {
+        const RIGHT_WINDOWS = 1 << 7;
+        const RIGHT_ALT = 1 << 6;
+        const RIGHT_SHIFT = 1 << 5;
+        const RIGHT_CTRL = 1 << 4;
+        const LEFT_WINDOWS = 1 << 3;
+        const LEFT_ALT = 1 << 2;
+        const LEFT_SHIFT = 1 << 1;
+        const LEFT_CTRL = 1 << 0;
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum CommandExecutionStatus {
+    Success,
+    ErrTimeout,
+    ErrHead,
+    ErrCmd,
+    ErrSum,
+    ErrPara,
+    ErrOperate,
+}
+
+impl CommandExecutionStatus {
+    fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            0x00 => Some(Self::Success),
+            0xE1 => Some(Self::ErrTimeout),
+            0xE2 => Some(Self::ErrHead),
+            0xE3 => Some(Self::ErrCmd),
+            0xE4 => Some(Self::ErrSum),
+            0xE5 => Some(Self::ErrPara),
+            0xE6 => Some(Self::ErrOperate),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -106,6 +158,7 @@ impl Command<'_> {
     pub fn cmd(self) -> u8 {
         match self {
             Self::GetInfo => 0x01,
+            Self::SendKbGeneralData { .. } => 0x02,
             Self::SendMyHidData { .. } => 0x06,
             Self::GetParaCfg => 0x08,
             Self::GetUsbString { .. } => 0x0A,
@@ -115,6 +168,19 @@ impl Command<'_> {
     pub fn data(self, buf: &mut [u8]) -> usize {
         match self {
             Self::GetInfo | Self::GetParaCfg => 0,
+            Self::SendKbGeneralData { modifiers, codes } => {
+                buf[0] = modifiers.bits();
+                buf[1] = 0x00;
+                for (b, code) in buf[2..8].iter_mut().zip(
+                    codes
+                        .iter()
+                        .map(|KeyCode(code)| *code)
+                        .chain(iter::repeat(0x00)),
+                ) {
+                    *b = code;
+                }
+                8
+            }
             Self::SendMyHidData { data } => {
                 buf[..data.len()].copy_from_slice(data);
                 data.len()
@@ -138,6 +204,15 @@ impl<'a> Response<'a> {
                 if data.len() == 8 {
                     let version = data[0].into();
                     Ok(Self::GetInfo { version })
+                } else {
+                    Err(Error::InvalidData)
+                }
+            }
+            0x82 => {
+                if data.len() == 1 {
+                    let status =
+                        CommandExecutionStatus::from_u8(data[0]).ok_or(Error::InvalidData)?;
+                    Ok(Self::SendKbGeneralData(status))
                 } else {
                     Err(Error::InvalidData)
                 }

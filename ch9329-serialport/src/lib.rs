@@ -25,7 +25,7 @@ impl<P> Device<P>
 where
     P: Read + Write,
 {
-    #[tracing::instrument(err, ret, skip(self))]
+    #[tracing::instrument(level = "debug", err, ret, skip(self))]
     pub fn clear(&mut self) -> Result<usize, Error> {
         let mut len = 0;
         loop {
@@ -38,18 +38,18 @@ where
         }
     }
 
-    #[tracing::instrument(err, ret, skip(self))]
+    #[tracing::instrument(level = "debug", err, ret, skip(self))]
     pub fn send(&mut self, command: ch9329::Command<'_>) -> Result<(), Error> {
         let packet = ch9329::encode(&mut self.buf, self.addr, command.cmd(), |buf| {
             command.data(buf)
         });
-        tracing::info!(packet = format_args!("{packet:02X?}"));
+        tracing::trace!(packet = format_args!("{packet:02X?}"));
         self.port.write_all(packet)?;
         self.port.flush()?;
         Ok(())
     }
 
-    #[tracing::instrument(err, ret, skip(self))]
+    #[tracing::instrument(level = "debug", err, ret, skip(self))]
     pub fn recv(&mut self) -> Result<(u8, ch9329::Response<'_>), Error> {
         // https://github.com/tokio-rs/tracing/issues/2796
         let this = self;
@@ -62,7 +62,7 @@ where
             len += n;
         }
         let packet = &this.buf[..len];
-        tracing::info!(packet = format_args!("{packet:02X?}"));
+        tracing::trace!(packet = format_args!("{packet:02X?}"));
         let (addr, cmd, data) = ch9329::decode(packet)?;
         Ok((addr, ch9329::Response::decode(cmd, data)?))
     }

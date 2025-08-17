@@ -1,0 +1,12 @@
+[package]
+name = "ch9329-copy"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow.workspace = true
+ch9329.path = "../ch9329"
+ch9329-serialport.path = "../ch9329-serialport"
+clap = { workspace = true, features = ["derive"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
