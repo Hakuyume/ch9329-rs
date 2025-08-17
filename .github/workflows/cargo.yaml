@@ -25,6 +25,7 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - run: sudo apt-get install --yes libudev-dev
       - run: cargo clippy --all-targets --locked -- --deny=warnings
   cargo-test:
     runs-on: ubuntu-latest
@@ -39,4 +40,5 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - run: sudo apt-get install --yes libudev-dev
       - run: cargo test --locked
